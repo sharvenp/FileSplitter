@@ -113,6 +113,29 @@ int main(int argc, char* argv[]) {
         return EOF;
     }
 
+    // Create meta file
+    printf("Creating metafile...\n");
+    FILE* meta_file;
+    char meta_file_name[255];
+    sprintf(meta_file_name, "./%s-meta", argv[1]);
+    if ((meta_file = fopen(meta_file_name, "w")) == NULL) {
+        perror(meta_file_name);
+        return 1;
+    }
+
+    // Save meta data
+    char* full_save_path = realpath(argv[3], NULL);
+    fprintf(meta_file, "%s\n", full_save_path);
+    fprintf(meta_file, "%s\n", argv[1]);
+    fprintf(meta_file, "%d\n", file_size);
+    fprintf(meta_file, "%d\n", chunk_i);
+
+    // Close the file
+    if (fclose(meta_file) == EOF) {
+        perror(meta_file_name);
+        return EOF;
+    }
+
     printf("** Done! **\n");
 
     return 0;
