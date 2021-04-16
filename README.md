@@ -30,3 +30,4 @@ This script will take in a metadata file and re-assemble it into the original fi
 
 # License
 
+[MIT LICENSE](LICENSE)
