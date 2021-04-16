@@ -40,28 +40,34 @@ int main(int argc, char* argv[]) {
     int chunk_size = file_size / chunks;
 
     printf("Splitting: %s\n", argv[1]);
-    printf("File size: %d B\n", file_size);
+    printf("File size: %dB\n", file_size);
     printf("Chunk count: %d\n", chunks);
-    printf("Chunk size: %d B\n", chunk_size);
+    printf("Chunk size limit: %dB\n", chunk_size);
     printf("** Starting Splitting Process **\n");
     
-    int bytes = 0; // Keep track of bytes read so far
+    int bytes = file_size; // Keep track of bytes read so far
     int chunk_i = 0; // Keep track of chunk index
     char *buffer; // Store the chunk
-
-    if ((buffer = malloc((chunk_size+1) * sizeof(char))) == NULL) {
-        perror("malloc: ");
-        fclose(file);
-        return 1;
-    }
 
     fseek(file, 0, SEEK_SET);
 
     // Write the chunks
-    while (bytes < file_size) {
+    while (bytes > 0) {
         
-        memset(buffer, 0, chunk_size * sizeof(char));
-        fread(buffer, (chunk_size+1), sizeof(char), file);
+        int buffer_size;
+        if (bytes > chunk_size) {
+            buffer_size = chunk_size;
+        } else {
+            buffer_size = bytes;
+        }
+
+        if ((buffer = malloc((buffer_size+1) * sizeof(char))) == NULL) {
+            perror("malloc: ");
+            fclose(file);
+            return 1;
+        }
+        
+        fread(buffer, (buffer_size), sizeof(char), file);
 
         // Create file name
         char chunk_dest[512];
@@ -72,15 +78,14 @@ int main(int argc, char* argv[]) {
 
         // Write to the file
         FILE* chunk_file;
-        // Open the file
         if ((chunk_file = fopen(chunk_dest, "wb")) == NULL) {
             perror(chunk_dest);
             fclose(file);
             return 1;
         }
         
-        int written = fwrite(buffer, sizeof(char), sizeof(char) * chunk_size, chunk_file);
-        if (written < sizeof(char) * chunk_size) {
+        int written = fwrite(buffer, sizeof(char), sizeof(char) * buffer_size, chunk_file);
+        if (written < sizeof(char) * buffer_size) {
             perror(chunk_dest);
             fclose(file);
             fclose(chunk_file);
@@ -94,10 +99,12 @@ int main(int argc, char* argv[]) {
             return EOF;
         }
 
-        printf("Chunk[%d]: %s-%d\n", chunk_i, argv[1], chunk_i);
+        printf("Chunk[%d]: %s-%d (Size: %d B)\n", chunk_i, argv[1], chunk_i, buffer_size);
 
-        bytes += chunk_size;
+        bytes -= buffer_size;
         chunk_i++;
+
+        free(buffer);
     }
 
     // Close the file
