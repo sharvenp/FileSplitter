@@ -1,112 +1,174 @@
 #include <stdlib.h>
 #include <stdio.h>
-#include <dirent.h>
-#include <errno.h>
 #include <string.h>
 
 #include <sys/stat.h>
+#include <unistd.h>
 
 int main(int argc, char* argv[]) {
 
     if (argc != 3) {
-        printf("Usage: assemble <save_dir> <save_file>\n");
+        printf("Usage: assemble <meta_file> <save_file>\n");
         return 0;
     }
 
-    // Check if save directory exists
-    DIR* dir = opendir(argv[1]);
-    if (dir) {
-        closedir(dir);
-    } else if (ENOENT == errno) {
-        perror(argv[3]);
-        return ENOENT;
-    } else {
-        perror(argv[3]);
-        return 1;
-    }
+    // Check if meta file exists
+    if(access(argv[1], F_OK) != 0) {
+        fprintf(stderr, "metafile does not exist\n");
+        return -1;
+    } 
 
-    // Open the file
-    FILE* file;
-    if ((file = fopen(argv[1], "rb")) == NULL) {
-        perror(argv[1]);
-        return 1;
-    }
-    
-    // Hold the data in the buffer
     struct stat st;
     stat(argv[1], &st);
-    int file_size = st.st_size;
-    int chunks = atoi(argv[2]);
-    int chunk_size = file_size / chunks;
+    if (st.st_size == 0) {
+        fprintf(stderr, "metadate is empty\n");
+        return -1;
+    }
 
-    printf("Splitting: %s\n", argv[1]);
-    printf("File size: %d B\n", file_size);
-    printf("Chunk count: %d\n", chunks);
-    printf("Chunk size: %d B\n", chunk_size);
-    printf("** Starting Splitting Process **\n");
+    printf("Parsing meta file...\n");
+
+    // Create meta file
+    FILE* meta_file;
+    if ((meta_file = fopen(argv[1], "rb")) == NULL) {
+        perror(argv[1]);
+        return -1;
+    }
+
+    // load meta data
+    char split_dir[512];
+    if (fgets(split_dir, 512, meta_file) == NULL) {
+        fprintf(stderr, "metafile is corrupted\n");
+        return -1;
+    }
+    split_dir[strcspn(split_dir, "\n")] = 0;
+
+    char file_name[255];
+    if (fgets(file_name, 255, meta_file) == NULL) {
+        fprintf(stderr, "metafile is corrupted\n");
+        return -1;
+    }
+    file_name[strcspn(file_name, "\n")] = 0;
+
+    char file_size_str[128];
+    if (fgets(file_size_str, 128, meta_file) == NULL) {
+        fprintf(stderr, "metafile is corrupted\n");
+        return -1;
+    }
+    file_size_str[strcspn(file_size_str, "\n")] = 0;
+    int file_size = atoi(file_size_str);
     
-    int bytes = 0; // Keep track of bytes read so far
-    int chunk_i = 0; // Keep track of chunk index
-    char *buffer; // Store the chunk
-
-    if ((buffer = malloc((chunk_size+1) * sizeof(char))) == NULL) {
-        perror("malloc: ");
-        fclose(file);
-        return 1;
+    char chunks_str[128];
+    if (fgets(chunks_str, 128, meta_file) == NULL) {
+        fprintf(stderr, "metafile is corrupted\n");
+        return -1;
     }
+    chunks_str[strcspn(chunks_str, "\n")] = 0;
+    int chunks = atoi(chunks_str);
 
-    fseek(file, 0, SEEK_SET);
-
-    // Write the chunks
-    while (bytes < file_size) {
-        
-        memset(buffer, 0, chunk_size * sizeof(char));
-        fread(buffer, (chunk_size+1), sizeof(char), file);
-
-        // Create file name
-        char chunk_dest[512];
-        char chunk_name[255];
-        memcpy(chunk_dest, argv[3], 255);
-        sprintf(chunk_name, "/%s-%d", argv[1], chunk_i);
-        strncat(chunk_dest, chunk_name, 512);
-
-        // Write to the file
-        FILE* chunk_file;
-        // Open the file
-        if ((chunk_file = fopen(chunk_dest, "wb")) == NULL) {
-            perror(chunk_dest);
-            fclose(file);
-            return 1;
-        }
-        
-        int written = fwrite(buffer, sizeof(char), sizeof(char) * chunk_size, chunk_file);
-        if (written < sizeof(char) * chunk_size) {
-            perror(chunk_dest);
-            fclose(file);
-            fclose(chunk_file);
-            return 1;
-        }
-
-        // Close the file
-        if (fclose(chunk_file) == EOF) {
-            perror(argv[1]);
-            fclose(file);
-            return EOF;
-        }
-
-        printf("Chunk[%d]: %s-%d\n", chunk_i, argv[1], chunk_i);
-
-        bytes += chunk_size;
-        chunk_i++;
-    }
-
-    // Close the file
-    if (fclose(file) == EOF) {
+    // Close the metadata file
+    if (fclose(meta_file) == EOF) {
         perror(argv[1]);
         return EOF;
     }
 
-    printf("** Done! **\n");
+    printf("Parsed meta file\n");
+
+    printf("Loading chunks...\n");
+    // Check if files exist
+    for (int i = 0; i < chunks; i++) {
+        char fn[255];
+        sprintf(fn, "%s/%s-%d", split_dir, file_name, i);
+        // Check if meta file exists
+        if(access(fn, F_OK) != 0) {
+            fprintf(stderr, "chunk mising: %s\n", fn);
+            return -1;
+        }
+        struct stat chunk_st;
+        stat(fn, &chunk_st);
+        if (chunk_st.st_size == 0) {
+            fprintf(stderr, "chunk[%d] is empty\n", i);
+            return -1;
+        }
+    }
+
+    // Load file chunks
+    FILE** chunk_files;
+    if ((chunk_files = malloc(sizeof(FILE*) * chunks)) == NULL) {
+        perror("malloc: ");
+        return -1;
+    }
+
+    int* chunk_sizes;
+    if ((chunk_sizes = malloc(sizeof(int) * chunks)) == NULL) {
+        perror("malloc: ");
+        return -1;
+    }
+
+    for (int i = 0; i < chunks; i++) {
+        char fn[255];
+        sprintf(fn, "%s/%s-%d", split_dir, file_name, i);
+        FILE* fp;
+        if ((fp = fopen(fn, "rb")) == NULL) {
+            perror(fn);
+            return -1;
+        }
+        chunk_files[i] = fp;
+
+        struct stat chunk_st;
+        stat(fn, &chunk_st);
+        chunk_sizes[i] = chunk_st.st_size;
+
+        printf("Chunk[%d]: %d\n", i, chunk_sizes[i]);
+    }
+
+    // Reconstruct file
+    printf("Reconstructing file...\n");
+
+    // Load file chunks
+    FILE* save_file;
+    if ((save_file = fopen(argv[2], "wb")) == NULL) {
+        perror(argv[2]);
+        return -1;
+    }
+
+    int bytes = 0;
+    for (int i = 0; i < chunks; i++) {
+        
+        char* buffer;
+        if ((buffer = malloc((chunk_sizes[i]+1) * sizeof(char))) == NULL) {
+            perror("malloc: ");
+            return -1;
+        }
+        
+        if (fread(buffer, 1, chunk_sizes[i], chunk_files[i]) < chunk_sizes[i]) {
+            perror("fread");
+            return -1;
+        }
+
+        if (fwrite(buffer, sizeof(char), chunk_sizes[i], save_file) < chunk_sizes[i]) {
+            perror("fwrite");
+            return -1;
+        }
+        
+        printf("Merged chunk[%d]\n", i);
+
+        bytes += chunk_sizes[i];
+
+        free(buffer);
+    }
+
+    // Close the save file
+    if (fclose(save_file) == EOF) {
+        perror(argv[2]);
+        return EOF;
+    }
+
+    if (bytes != file_size) {
+        fprintf(stderr, "difference in true file size and observed file size\nexpected: %d\nobserved: %d\n", file_size, bytes);
+        return -1;
+    }
+
+    printf("Done!\n");
 
     return 0;
 }

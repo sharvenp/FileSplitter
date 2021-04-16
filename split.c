@@ -22,7 +22,7 @@ int main(int argc, char* argv[]) {
         return ENOENT;
     } else {
         perror(argv[3]);
-        return 1;
+        return -1;
     }
 
     // Open the file
@@ -32,17 +32,22 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
-    // Hold the data in the buffer
+    // Calculate sizes
     struct stat st;
     stat(argv[1], &st);
     int file_size = st.st_size;
     int chunks = atoi(argv[2]);
     int chunk_size = file_size / chunks;
 
+    if (chunks == 0) {
+        perror("number_of_chunks is 0");
+        return -1;
+    }
+
     printf("Splitting: %s\n", argv[1]);
     printf("File size: %dB\n", file_size);
-    printf("Chunk count: %d\n", chunks);
     printf("Chunk size limit: %dB\n", chunk_size);
+    printf("Chunk count: %d\n", chunks);
     printf("** Starting Splitting Process **\n");
     
     int bytes = file_size; // Keep track of bytes read so far
@@ -63,8 +68,7 @@ int main(int argc, char* argv[]) {
 
         if ((buffer = malloc((buffer_size+1) * sizeof(char))) == NULL) {
             perror("malloc: ");
-            fclose(file);
-            return 1;
+            return -1;
         }
         
         fread(buffer, (buffer_size), sizeof(char), file);
@@ -80,22 +84,18 @@ int main(int argc, char* argv[]) {
         FILE* chunk_file;
         if ((chunk_file = fopen(chunk_dest, "wb")) == NULL) {
             perror(chunk_dest);
-            fclose(file);
-            return 1;
+            return -1;
         }
         
         int written = fwrite(buffer, sizeof(char), sizeof(char) * buffer_size, chunk_file);
         if (written < sizeof(char) * buffer_size) {
             perror(chunk_dest);
-            fclose(file);
-            fclose(chunk_file);
-            return 1;
+            return -1;
         }
 
         // Close the file
         if (fclose(chunk_file) == EOF) {
             perror(argv[1]);
-            fclose(file);
             return EOF;
         }
 
@@ -118,9 +118,9 @@ int main(int argc, char* argv[]) {
     FILE* meta_file;
     char meta_file_name[255];
     sprintf(meta_file_name, "./%s-meta", argv[1]);
-    if ((meta_file = fopen(meta_file_name, "w")) == NULL) {
+    if ((meta_file = fopen(meta_file_name, "wb")) == NULL) {
         perror(meta_file_name);
-        return 1;
+        return -1;
     }
 
     // Save meta data
